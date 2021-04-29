@@ -19,8 +19,8 @@ import (
 )
 
 type enableResponseCaching struct {
-	rt            http.RoundTripper
-	maxAgeSeconds int
+	rt     http.RoundTripper
+	maxAge time.Duration
 }
 
 func (rt *enableResponseCaching) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -28,13 +28,13 @@ func (rt *enableResponseCaching) RoundTrip(req *http.Request) (*http.Response, e
 	if err != nil {
 		return nil, err
 	}
-	resp.Header.Set("Cache-Control", fmt.Sprintf("max-age=%d", rt.maxAgeSeconds)) // cache response for 5 minutes
+	resp.Header.Set("Cache-Control", fmt.Sprintf("max-age=%d", int(rt.maxAge.Seconds()))) // cache response for 5 minutes
 	return resp, nil
 }
 
 func EnableResponseCaching(maxAge time.Duration) func(rt http.RoundTripper) http.RoundTripper {
 	return func(rt http.RoundTripper) http.RoundTripper {
-		return &enableResponseCaching{rt, int(maxAge.Seconds())}
+		return &enableResponseCaching{rt, maxAge}
 	}
 }
 
