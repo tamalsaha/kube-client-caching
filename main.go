@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"k8s.io/client-go/transport"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -12,43 +11,31 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/transport"
 	"k8s.io/client-go/util/homedir"
 )
 
 type enableResponseCaching struct {
-	rt http.RoundTripper
+	rt            http.RoundTripper
+	maxAgeSeconds int
 }
 
-func (a *enableResponseCaching) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := a.rt.RoundTrip(req)
+func (rt *enableResponseCaching) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := rt.rt.RoundTrip(req)
 	if err != nil {
 		return nil, err
 	}
-	resp.Header.Set("Cache-Control", "max-age=300") // cache response for 5 minutes
+	resp.Header.Set("Cache-Control", fmt.Sprintf("max-age=%d", rt.maxAgeSeconds)) // cache response for 5 minutes
 	return resp, nil
 }
 
-func EnableResponseCaching(rt http.RoundTripper) http.RoundTripper {
-	return &enableResponseCaching{rt}
+func EnableResponseCaching(rt http.RoundTripper, maxAgeSeconds int) http.RoundTripper {
+	return &enableResponseCaching{rt, maxAgeSeconds}
 }
 
 var _ http.RoundTripper = &enableResponseCaching{}
-
-type acceptCachedResponse struct {
-	rt http.RoundTripper
-}
-
-func (u *acceptCachedResponse) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.Header.Set("Cache-Control", "only-if-cached")
-	return u.rt.RoundTrip(req)
-}
-
-func AcceptCachedResponse(rt http.RoundTripper) http.RoundTripper {
-	return &acceptCachedResponse{rt}
-}
-
-var _ http.RoundTripper = &acceptCachedResponse{}
 
 func CacheResponse(rt http.RoundTripper) http.RoundTripper {
 	t := httpcache.NewMemoryCacheTransport()
@@ -65,30 +52,36 @@ func main() {
 		log.Fatalf("Could not get Kubernetes config: %s", err)
 	}
 
-	config.Wrap(transport.Wrappers(EnableResponseCaching, CacheResponse))
+	c2 := rest.CopyConfig(config)
+	c2.Wrap(transport.Wrappers(EnableResponseCaching, CacheResponse))
 
-	//config.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-	//	t := httpcache.NewMemoryCacheTransport()
-	//
-	//	t.Transport = &enableResponseCaching{rt}
-	//	return t
-	//})
-
-	dc := dynamic.NewForConfigOrDie(config)
+	dc2 := dynamic.NewForConfigOrDie(c2)
 
 	gvrNode := schema.GroupVersionResource{
 		Group:    "",
 		Version:  "v1",
 		Resource: "nodes",
 	}
-	nodes, err := dc.Resource(gvrNode).List(context.TODO(), metav1.ListOptions{})
+	nodes, err := dc2.Resource(gvrNode).List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		panic(err)
 	}
 	for _, obj := range nodes.Items {
 		fmt.Printf("%+v\n", obj.GetName())
 	}
-	nodes, err = dc.Resource(gvrNode).List(context.TODO(), metav1.ListOptions{})
+	nodes, err = dc2.Resource(gvrNode).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		panic(err)
+	}
+	for _, obj := range nodes.Items {
+		fmt.Printf("%+v\n", obj.GetName())
+	}
+
+	c3 := rest.CopyConfig(config)
+	// c3.Wrap(transport.Wrappers(EnableResponseCaching, CacheResponse))
+	dc3 := dynamic.NewForConfigOrDie(c3)
+
+	nodes, err = dc3.Resource(gvrNode).List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -108,7 +101,7 @@ func main() {
 		Version:  "v1",
 		Resource: "pods",
 	}
-	result, err := dc.Resource(gvrPod).Namespace("kube-system").List(context.TODO(), metav1.ListOptions{
+	result, err := dc2.Resource(gvrPod).Namespace("kube-system").List(context.TODO(), metav1.ListOptions{
 		LabelSelector: sel.String(),
 	})
 	if err != nil {
