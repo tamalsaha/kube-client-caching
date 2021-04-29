@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/gregjones/httpcache"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,8 +32,10 @@ func (rt *enableResponseCaching) RoundTrip(req *http.Request) (*http.Response, e
 	return resp, nil
 }
 
-func EnableResponseCaching(rt http.RoundTripper, maxAgeSeconds int) http.RoundTripper {
-	return &enableResponseCaching{rt, maxAgeSeconds}
+func EnableResponseCaching(maxAge time.Duration) func(rt http.RoundTripper) http.RoundTripper {
+	return func(rt http.RoundTripper) http.RoundTripper {
+		return &enableResponseCaching{rt, int(maxAge.Seconds())}
+	}
 }
 
 var _ http.RoundTripper = &enableResponseCaching{}
@@ -52,8 +55,9 @@ func main() {
 		log.Fatalf("Could not get Kubernetes config: %s", err)
 	}
 
+	// copy so that only the client generated from the copied version will cache responses
 	c2 := rest.CopyConfig(config)
-	c2.Wrap(transport.Wrappers(EnableResponseCaching, CacheResponse))
+	c2.Wrap(transport.Wrappers(EnableResponseCaching(5*time.Minute), CacheResponse))
 
 	dc2 := dynamic.NewForConfigOrDie(c2)
 
@@ -77,6 +81,7 @@ func main() {
 		fmt.Printf("%+v\n", obj.GetName())
 	}
 
+	// This copy will not cache responses
 	c3 := rest.CopyConfig(config)
 	// c3.Wrap(transport.Wrappers(EnableResponseCaching, CacheResponse))
 	dc3 := dynamic.NewForConfigOrDie(c3)
