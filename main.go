@@ -28,7 +28,7 @@ func (rt *enableResponseCaching) RoundTrip(req *http.Request) (*http.Response, e
 	if err != nil {
 		return nil, err
 	}
-	resp.Header.Set("Cache-Control", fmt.Sprintf("max-age=%d", int(rt.maxAge.Seconds()))) // cache response for 5 minutes
+	resp.Header.Set("Cache-Control", fmt.Sprintf("max-age=%d", int(rt.maxAge.Seconds())))
 	return resp, nil
 }
 
